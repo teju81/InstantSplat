@@ -33,6 +33,9 @@ from utils.camera_utils import generate_interpolated_path
 from utils.camera_utils import visualizer
 from arguments import ModelParams, PipelineParams, get_combined_args
 
+
+import pynvml
+
 def save_interpolate_pose(model_path, iter, n_views):
 
     org_pose = np.load(model_path / f"pose/ours_{iter}/pose_optimized.npy")
@@ -76,6 +79,13 @@ def images_to_video(image_folder, output_video_path, fps=30):
     imageio.mimwrite(output_video_path, images, fps=fps)
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+
+    print(f"Used: {info.used // 1024**2} MB")
+    print(f"Free: {info.free // 1024**2} MB")    
+
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -83,18 +93,34 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gts_path, exist_ok=True)
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+
         camera_pose = get_tensor_from_camera(view.world_view_transform.transpose(0, 1))
+        print("Fetched camera pose!!")
+        print(f"Used: {info.used // 1024**2} MB")
+        print(f"Free: {info.free // 1024**2} MB")
         rendering = render(
             view, gaussians, pipeline, background, camera_pose=camera_pose
         )["render"]
+        print("Rendered Novel view!!")
+        print(f"Used: {info.used // 1024**2} MB")
+        print(f"Free: {info.free // 1024**2} MB")
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(
             rendering, os.path.join(render_path, "{0:05d}".format(idx) + ".png")
         )
+        print("Saving Image...")
+        print(f"Used: {info.used // 1024**2} MB")
+        print(f"Free: {info.free // 1024**2} MB")
         if name != "interp":
             torchvision.utils.save_image(   
                 gt, os.path.join(gts_path, "{0:05d}".format(idx) + ".png")
             )
+
+        del rendering
+        torch.cuda.empty_cache()
+        print(torch.cuda.memory_summary())
+
+
 
 def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline, background):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
@@ -109,6 +135,7 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
     gaussians._opacity.requires_grad_(False)
     gaussians._scaling.requires_grad_(False)
     gaussians._rotation.requires_grad_(False)
+
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         num_iter = args.optim_test_pose_iter
@@ -126,6 +153,8 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
 
         # Add a learning rate scheduler
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(pose_optimizer, T_max=num_iter, eta_min=0.0001)
+        print("Learning rate scheduler set!!")
+
         with tqdm(total=num_iter, desc=f"Tracking Time Step: {idx+1}", leave=True) as progress_bar:
             candidate_q = camera_tensor_q.clone().detach()
             candidate_T = camera_tensor_T.clone().detach()
@@ -134,6 +163,7 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
             initial_loss = None
 
             for iteration in range(num_iter):
+
                 rendering = render(view, gaussians, pipeline, background, camera_pose=torch.cat([camera_tensor_q, camera_tensor_T]))["render"]
                 black_hole_threshold = 0.0
                 mask = (rendering > black_hole_threshold).float()
@@ -202,7 +232,7 @@ def render_sets(
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     # if not skip_train:
-    if not skip_train and not args.infer_video and not dataset.eval:        
+    if not skip_train and not args.infer_video and not dataset.eval:
         optimized_pose = np.load(Path(args.model_path) / 'pose' / f'ours_{iteration}' / 'pose_optimized.npy')
         viewpoint_stack = loadCameras(optimized_pose, scene.getTrainCameras())
         render_set(
