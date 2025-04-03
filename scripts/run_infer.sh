@@ -1,19 +1,18 @@
 #!/bin/bash
 
 # Change the absolute path first!
-DATA_ROOT_DIR="<Absolute_Path>/InstantSplat/assets"
+DATA_ROOT_DIR="/root/code/datasets"
 OUTPUT_DIR="output_infer"
 DATASETS=(
-    sora
+    artgarage
 )
 
 SCENES=(
-    Santorini
-    Art 
+    vending_machine_is
 )
 
 N_VIEWS=(
-    3
+    11
 )
 
 gs_train_iter=1000
@@ -47,7 +46,7 @@ run_on_gpu() {
 
     # (1) Co-visible Global Geometry Initialization
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Co-visible Global Geometry Initialization..."
-    CUDA_VISIBLE_DEVICES=${GPU_ID} python -W ignore ./init_geo.py \
+    CUDA_VISIBLE_DEVICES=${GPU_ID} python3 -W ignore ./init_geo.py \
     -s ${SOURCE_PATH} \
     -m ${MODEL_PATH} \
     --n_views ${N_VIEW} \
@@ -60,7 +59,7 @@ run_on_gpu() {
  
     # (2) Train: jointly optimize pose
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting training..."
-    CUDA_VISIBLE_DEVICES=${GPU_ID} python ./train.py \
+    CUDA_VISIBLE_DEVICES=${GPU_ID} python3 ./train.py \
     -s ${SOURCE_PATH} \
     -m ${MODEL_PATH} \
     -r 1 \
@@ -73,7 +72,7 @@ run_on_gpu() {
 
     # (3) Render-Video
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting rendering training views..."
-    CUDA_VISIBLE_DEVICES=${GPU_ID} python ./render.py \
+    CUDA_VISIBLE_DEVICES=${GPU_ID} python3 ./render.py \
     -s ${SOURCE_PATH} \
     -m ${MODEL_PATH} \
     -r 1 \
@@ -100,15 +99,18 @@ for DATASET in "${DATASETS[@]}"; do
                 current_task=$((current_task + 1))
                 echo "Processing task $current_task / $total_tasks"
 
-                # Get available GPU
-                GPU_ID=$(get_available_gpu)
 
-                # If no GPU is available, wait for a while and retry
-                while [ -z "$GPU_ID" ]; do
-                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] No GPU available, waiting 60 seconds before retrying..."
-                    sleep 60
-                    GPU_ID=$(get_available_gpu)
-                done
+                GPU_ID=0
+
+                # # Get available GPU
+                # GPU_ID=$(get_available_gpu)
+
+                # # If no GPU is available, wait for a while and retry
+                # while [ -z "$GPU_ID" ]; do
+                #     echo "[$(date '+%Y-%m-%d %H:%M:%S')] No GPU available, waiting 60 seconds before retrying..."
+                #     sleep 60
+                #     GPU_ID=$(get_available_gpu)
+                # done
 
                 # Run the task in the background
                 (run_on_gpu $GPU_ID "$DATASET" "$SCENE" "$N_VIEW" "$gs_train_iter") &
